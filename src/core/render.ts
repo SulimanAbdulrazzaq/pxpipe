@@ -525,6 +525,28 @@ function isEscapeExempt(cp: number): boolean {
   return false;
 }
 
+/** Blank cells reserved on EACH side of the ↵ marker when it is laid out.
+ *  Without them the marker carries no separation at all, so the value ending one
+ *  source line and the identifier starting the next fuse into a single visual
+ *  token (`00014↵L00003`) — a reader that transcribes the image perfectly still
+ *  attributes line-trailing values to the FOLLOWING line. One cell per side makes
+ *  the strongest boundary in the source separate at least as strongly as an
+ *  intra-line word gap. */
+const NL_SENTINEL_PAD_CELLS = 1;
+
+/** Surround every ↵ with blank cells so it reads as its own token. Pure
+ *  string→string, applied at the same layer as tab expansion and atlas-miss
+ *  escaping (wrapLines + measureContentCols), so wrap math and canvas
+ *  measurement stay consistent. Runs on the render copy only: `reflow` still
+ *  emits the bare sentinel, so the reflow/dereflow round-trip is untouched.
+ *  Fast path allocates nothing for text with no markers (every non-reflowed
+ *  render). */
+export function padNewlineMarkers(line: string): string {
+  if (line.indexOf(NL_SENTINEL) < 0) return line; // fast path
+  const pad = ' '.repeat(NL_SENTINEL_PAD_CELLS);
+  return line.split(NL_SENTINEL).join(pad + NL_SENTINEL + pad);
+}
+
 /** Replace atlas-missing codepoints with `[U+HEX]` (uppercase hex — e.g.
  *  🔥 → `[U+1F525]`). Lossless for non-exempt misses (hex → codepoint) and
  *  idempotent: the escape spells only atlas-present chars, so a second pass is
@@ -612,7 +634,11 @@ export function measureContentCols(
   let start = 0;
   for (let i = 0; i <= text.length; i++) {
     if (i === text.length || text[i] === '\n') {
-      const w = measureLineCols(escapeMissingGlyphs(expandTabsInLine(text.slice(start, i))), markerScale, font);
+      const w = measureLineCols(
+        escapeMissingGlyphs(padNewlineMarkers(expandTabsInLine(text.slice(start, i)))),
+        markerScale,
+        font,
+      );
       if (w > widest) widest = w;
       if (widest >= cap) return cap;
       start = i + 1;
@@ -630,7 +656,7 @@ export function wrapLines(
   const out: string[] = [];
   const minified = minifyForRender(text);
   for (const rawWithTabs of minified.split('\n')) {
-    const raw = escapeMissingGlyphs(expandTabsInLine(rawWithTabs));
+    const raw = escapeMissingGlyphs(padNewlineMarkers(expandTabsInLine(rawWithTabs)));
     if (raw.length === 0) {
       out.push('');
       continue;
