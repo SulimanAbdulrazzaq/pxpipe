@@ -26,7 +26,11 @@ import {
   padNewlineMarkers,
   wrapLines,
   measureContentCols,
+  renderTextToPngs,
+  renderCellHeight,
+  PAD_Y,
 } from '../src/core/render.js';
+import { countVisualRows } from '../src/core/transform.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -752,5 +756,21 @@ describe('↵ marker spacing at the render layer', () => {
     const measured = measureContentCols(reflowed, 312);
     const laidOut = wrapLines(reflowed, 312)[0]!.length;
     expect(measured).toBe(laidOut);
+  });
+
+  it('renders and estimates the rows wrapLines lays out, across pages', async () => {
+    // Pages are rendered from rows wrapLines already padded; padding them again
+    // pushed marker rows past `cols` and added rows the gate estimate never saw.
+    const reflowed = reflow(Array.from({ length: 400 }, (_, i) => ledger(i)).join('\n'))!;
+    const cols = 84;
+    const rows = wrapLines(reflowed, cols).length;
+    const images = await renderTextToPngs(reflowed, cols);
+    expect(images.length).toBeGreaterThan(1);
+    const rendered = images.reduce(
+      (sum, img) => sum + (img.height - 2 * PAD_Y) / renderCellHeight({}),
+      0,
+    );
+    expect(rendered).toBe(rows);
+    expect(countVisualRows(reflowed, cols)).toBe(rows);
   });
 });
